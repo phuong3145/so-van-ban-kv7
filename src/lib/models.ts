@@ -4,6 +4,8 @@ import {
   DocCategory,
   RolePermissionsMatrix,
   DEFAULT_ROLE_PERMISSIONS,
+  DEFAULT_RECIPIENTS,
+  DEFAULT_SIGNERS,
 } from "./constants";
 
 export interface IUser extends MongooseDocument {
@@ -96,6 +98,8 @@ export interface ISystemSetting extends MongooseDocument {
   unitName: string; // e.g., "Đội / Đơn vị KV7"
   padZero: boolean; // Pad 1 -> 01
   rolePermissions: RolePermissionsMatrix;
+  recipients: string[];
+  signers: string[];
 }
 
 const SystemSettingSchema = new Schema<ISystemSetting>(
@@ -107,6 +111,14 @@ const SystemSettingSchema = new Schema<ISystemSetting>(
     rolePermissions: {
       type: Schema.Types.Mixed,
       default: DEFAULT_ROLE_PERMISSIONS,
+    },
+    recipients: {
+      type: [String],
+      default: DEFAULT_RECIPIENTS,
+    },
+    signers: {
+      type: [String],
+      default: DEFAULT_SIGNERS,
     },
   },
   { timestamps: true }

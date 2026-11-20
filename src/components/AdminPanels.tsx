@@ -39,6 +39,8 @@ interface SystemConfigDTO {
   unitName: string;
   padZero: boolean;
   rolePermissions: RolePermissionsMatrix;
+  recipients?: string[];
+  signers?: string[];
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 

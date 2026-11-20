@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FileText,
   PlusCircle,
@@ -18,8 +18,12 @@ import {
   Check,
   Database,
   Sparkles,
+  Plus,
+  ChevronDown,
 } from "lucide-react";
 import {
+  DEFAULT_RECIPIENTS,
+  DEFAULT_SIGNERS,
   DOC_CATEGORIES,
   DocCategory,
   PermissionKey,
@@ -65,6 +69,8 @@ interface SystemConfigDTO {
   unitName: string;
   padZero: boolean;
   rolePermissions: RolePermissionsMatrix;
+  recipients?: string[];
+  signers?: string[];
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 
@@ -72,6 +78,152 @@ type CounterSummary = Record<
   DocCategory,
   { currentSeq: number; nextSoHieu: string; totalDocs: number }
 >;
+
+// Component Autocomplete Dropdown cho "Nơi nhận / gửi" với nút [+] thêm vào Database
+function RecipientAutocomplete({
+  value,
+  onChange,
+  recipients,
+  onRecipientAdded,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  recipients: string[];
+  onRecipientAdded: (newList: string[], addedItem: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const cleanInput = value.trim();
+  const filtered = recipients.filter((r) =>
+    r.toLowerCase().includes(cleanInput.toLowerCase())
+  );
+  const exactExists = recipients.some(
+    (r) => r.toLowerCase() === cleanInput.toLowerCase()
+  );
+
+  async function handleAddNewRecipient() {
+    if (!cleanInput || exactExists || adding) return;
+    setAdding(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient: cleanInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.recipients) {
+        onRecipientAdded(data.recipients, cleanInput);
+        setOpen(false);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="flex items-center gap-1.5">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            required
+            value={value}
+            onFocus={() => setOpen(true)}
+            onChange={(e) => {
+              onChange(e.target.value);
+              setOpen(true);
+            }}
+            placeholder="Chọn hoặc nhập nơi nhận/gửi (Đội 1, 2, 3...)"
+            className="w-full pl-3 pr-8 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="absolute right-2 top-2.5 text-slate-400 hover:text-slate-600"
+            tabIndex={-1}
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        </div>
+
+        {cleanInput && !exactExists && (
+          <button
+            type="button"
+            onClick={handleAddNewRecipient}
+            disabled={adding}
+            title={`Thêm "${cleanInput}" vào danh sách Nơi nhận/gửi trong CSDL`}
+            className="shrink-0 inline-flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{adding ? "Đang lưu..." : "Lưu mới"}</span>
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+          {filtered.length > 0 ? (
+            filtered.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  onChange(item);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3.5 py-2 text-sm hover:bg-blue-50 transition flex items-center justify-between ${
+                  value === item
+                    ? "bg-blue-50/70 font-semibold text-blue-700"
+                    : "text-slate-700"
+                }`}
+              >
+                <span>{item}</span>
+                {value === item && <Check className="w-3.5 h-3.5 text-blue-600" />}
+              </button>
+            ))
+          ) : (
+            <div className="px-3.5 py-2.5 text-xs text-slate-500">
+              Chưa có &ldquo;<strong>{cleanInput}</strong>&rdquo; trong danh sách.
+            </div>
+          )}
+
+          {cleanInput && !exactExists && (
+            <button
+              type="button"
+              onClick={handleAddNewRecipient}
+              disabled={adding}
+              className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span>
+                {adding
+                  ? "Đang thêm vào CSDL..."
+                  : `Thêm "${cleanInput}" vào danh sách Nơi nhận/gửi`}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function HomePage() {
   const [user, setUser] = useState<UserDTO | null>(null);
@@ -100,10 +252,9 @@ export default function HomePage() {
   );
   const [formTrichYeu, setFormTrichYeu] = useState("");
   const [formNoiGui, setFormNoiGui] = useState("");
-  const [formNguoiKy, setFormNguoiKy] = useState("");
+  const [formNguoiKy, setFormNguoiKy] = useState(DEFAULT_SIGNERS[0]);
   const [formNguoiLaySoName, setFormNguoiLaySoName] = useState("");
   const [formGhiChu, setFormGhiChu] = useState("");
-  const [formCustomStt, setFormCustomStt] = useState("");
   const [submittingDoc, setSubmittingDoc] = useState(false);
 
   // Newly issued number banner
@@ -124,6 +275,13 @@ export default function HomePage() {
 
   const [alertError, setAlertError] = useState("");
   const [alertSuccess, setAlertSuccess] = useState("");
+
+  const recipientsList = config?.recipients?.length
+    ? config.recipients
+    : DEFAULT_RECIPIENTS;
+  const signersList = config?.signers?.length
+    ? config.signers
+    : DEFAULT_SIGNERS;
 
   const checkPerm = useCallback(
     (perm: PermissionKey): boolean => {
@@ -192,10 +350,9 @@ export default function HomePage() {
     setFormNgayLaySo(new Date().toISOString().slice(0, 10));
     setFormTrichYeu("");
     setFormNoiGui("");
-    setFormNguoiKy("");
+    setFormNguoiKy(signersList[0] || DEFAULT_SIGNERS[0]);
     setFormNguoiLaySoName(user?.fullName || "");
     setFormGhiChu("");
-    setFormCustomStt("");
     setAlertError("");
     setShowTakeModal(true);
   }
@@ -217,7 +374,6 @@ export default function HomePage() {
           nguoiKy: formNguoiKy,
           nguoiLaySoName: formNguoiLaySoName,
           ghiChu: formGhiChu,
-          customStt: formCustomStt ? Number(formCustomStt) : undefined,
         }),
       });
       const data = await res.json();
@@ -317,7 +473,7 @@ export default function HomePage() {
       "Số hiệu",
       "Loại VB",
       "Trích yếu nội dung",
-      "Nơi gửi",
+      "Nơi nhận / gửi",
       "Người ký",
       "Người lấy số",
       "Ghi chú",
@@ -410,7 +566,7 @@ export default function HomePage() {
               <span>
                 {config?.storageMode === "MONGODB"
                   ? "MongoDB Connected"
-                  : "Local DB (Chờ gắn MONGODB_URI)"}
+                  : "Local DB"}
               </span>
             </div>
 
@@ -486,7 +642,7 @@ export default function HomePage() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         {activeTab === "SO_VAN_BAN" && (
           <>
-            {/* 4 Category Cards: KH, BC, TTr, GM */}
+            {/* 4 Category Cards: KH, BC, TTr, GM (Đã bỏ "Số tiếp theo dự kiến") */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {DOC_CATEGORIES.map((cat) => {
                 const stat = counters?.[cat.code];
@@ -522,30 +678,21 @@ export default function HomePage() {
                       </p>
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                      <div>
-                        <div className="text-[11px] text-slate-400 uppercase font-semibold">
-                          Số tiếp theo dự kiến
-                        </div>
-                        <div className="text-sm font-mono font-bold text-blue-700">
-                          {stat?.nextSoHieu || `01/${cat.code}-${config?.unitCode || "KV7"}`}
-                        </div>
-                      </div>
-
-                      {checkPerm("TAKE_NUMBER") && (
+                    {checkPerm("TAKE_NUMBER") && (
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             openTakeNumberModal(cat.code);
                           }}
-                          className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-1"
+                          className="w-full justify-center px-3 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-1.5"
                         >
                           <PlusCircle className="w-3.5 h-3.5" />
-                          Lấy số {cat.code}
+                          Lấy số {cat.name} ({cat.code})
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -687,7 +834,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Table: STT, Ngày tháng năm lấy số, Số hiệu (VD 01/KH-KV7), Trích yếu nội dung, Nơi gửi, Người ký, Người lấy số, Ghi chú */}
+            {/* Table: STT, Ngày tháng năm lấy số, Số hiệu, Trích yếu nội dung, Nơi nhận/gửi, Người ký, Người lấy số, Ghi chú */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -703,7 +850,9 @@ export default function HomePage() {
                       <th className="px-4 py-3.5 min-w-[240px]">
                         Trích yếu nội dung
                       </th>
-                      <th className="px-3.5 py-3.5 min-w-[140px]">Nơi gửi</th>
+                      <th className="px-3.5 py-3.5 min-w-[140px]">
+                        Nơi nhận / gửi
+                      </th>
                       <th className="px-3.5 py-3.5 whitespace-nowrap">
                         Người ký
                       </th>
@@ -856,18 +1005,14 @@ export default function HomePage() {
       {/* Modal Lấy Số Văn Bản Mới */}
       {showTakeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden my-8">
-            <div className="px-6 py-4 bg-gradient-to-r from-blue-800 to-indigo-900 text-white flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-visible my-8">
+            <div className="px-6 py-4 bg-gradient-to-r from-blue-800 to-indigo-900 text-white rounded-t-2xl flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base">
                   Lấy Số Văn Bản Mới
                 </h3>
                 <p className="text-xs text-blue-200">
-                  Số dự kiến cấp:{" "}
-                  <strong className="font-mono text-amber-300 text-sm">
-                    {counters?.[formCategory]?.nextSoHieu ||
-                      `01/${formCategory}-${config?.unitCode || "KV7"}`}
-                  </strong>
+                  Chọn mục văn bản và điền thông tin để hệ thống cấp số tự động
                 </p>
               </div>
               <button
@@ -930,15 +1075,21 @@ export default function HomePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nơi gửi / Nơi nhận *
+                    Nơi nhận / gửi *{" "}
+                    <span className="font-normal text-slate-500">
+                      (Nhập mới bấm + để lưu)
+                    </span>
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <RecipientAutocomplete
                     value={formNoiGui}
-                    onChange={(e) => setFormNoiGui(e.target.value)}
-                    placeholder="VD: Phòng Tham mưu, Công an Tỉnh..."
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
+                    onChange={setFormNoiGui}
+                    recipients={recipientsList}
+                    onRecipientAdded={(newList, addedItem) => {
+                      setConfig((prev) =>
+                        prev ? { ...prev, recipients: newList } : prev
+                      );
+                      setFormNoiGui(addedItem);
+                    }}
                   />
                 </div>
 
@@ -946,14 +1097,18 @@ export default function HomePage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Người ký văn bản *
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <select
                     value={formNguoiKy}
                     onChange={(e) => setFormNguoiKy(e.target.value)}
-                    placeholder="VD: Đ/c Nguyễn Văn A - Đội trưởng"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none"
-                  />
+                    required
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white font-medium text-slate-900 focus:ring-2 focus:ring-blue-600 outline-none"
+                  >
+                    {signersList.map((signer) => (
+                      <option key={signer} value={signer}>
+                        {signer}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -985,22 +1140,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {checkPerm("INSERT_CUSTOM_NUMBER") && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <label className="block text-xs font-semibold text-amber-900 mb-1">
-                    Chèn STT tùy chỉnh (Chỉ dành cho cấp có quyền Quản lý sổ - Để trống nếu lấy số tự động tiếp theo)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={formCustomStt}
-                    onChange={(e) => setFormCustomStt(e.target.value)}
-                    placeholder="Để trống để nhảy số tự động"
-                    className="w-full sm:w-48 px-3 py-1.5 text-sm border border-amber-300 rounded-md bg-white"
-                  />
-                </div>
-              )}
-
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -1025,8 +1164,8 @@ export default function HomePage() {
       {/* Modal Chỉnh sửa văn bản */}
       {editingDoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden">
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-visible">
+            <div className="px-6 py-4 bg-slate-900 text-white rounded-t-2xl flex items-center justify-between">
               <h3 className="font-bold text-base">
                 Cập nhật văn bản số:{" "}
                 <span className="font-mono text-amber-400">
@@ -1085,28 +1224,40 @@ export default function HomePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nơi gửi *
+                    Nơi nhận / gửi *
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <RecipientAutocomplete
                     value={editNoiGui}
-                    onChange={(e) => setEditNoiGui(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                    onChange={setEditNoiGui}
+                    recipients={recipientsList}
+                    onRecipientAdded={(newList, addedItem) => {
+                      setConfig((prev) =>
+                        prev ? { ...prev, recipients: newList } : prev
+                      );
+                      setEditNoiGui(addedItem);
+                    }}
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Người ký *
+                    Người ký văn bản *
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <select
                     value={editNguoiKy}
                     onChange={(e) => setEditNguoiKy(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
-                  />
+                    required
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white font-medium text-slate-900"
+                  >
+                    {!signersList.includes(editNguoiKy) && editNguoiKy && (
+                      <option value={editNguoiKy}>{editNguoiKy}</option>
+                    )}
+                    {signersList.map((signer) => (
+                      <option key={signer} value={signer}>
+                        {signer}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

@@ -7,6 +7,8 @@ import {
   DocCategory,
   RolePermissionsMatrix,
   DEFAULT_ROLE_PERMISSIONS,
+  DEFAULT_RECIPIENTS,
+  DEFAULT_SIGNERS,
   PermissionKey,
 } from "./constants";
 import { connectDB } from "./mongodb";
@@ -50,6 +52,8 @@ export interface SystemConfigDTO {
   unitName: string;
   padZero: boolean;
   rolePermissions: RolePermissionsMatrix;
+  recipients: string[];
+  signers: string[];
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 
@@ -62,6 +66,8 @@ interface LocalDBShape {
     unitName: string;
     padZero: boolean;
     rolePermissions: RolePermissionsMatrix;
+    recipients: string[];
+    signers: string[];
   };
 }
 
@@ -92,6 +98,8 @@ function getInitialLocalDB(): LocalDBShape {
       unitName: "Đơn vị KV7",
       padZero: true,
       rolePermissions: JSON.parse(JSON.stringify(DEFAULT_ROLE_PERMISSIONS)),
+      recipients: [...DEFAULT_RECIPIENTS],
+      signers: [...DEFAULT_SIGNERS],
     },
   };
 }
@@ -172,7 +180,22 @@ export async function ensureSeedAndSettings(): Promise<SystemConfigDTO> {
         unitName: "Đơn vị KV7",
         padZero: true,
         rolePermissions: DEFAULT_ROLE_PERMISSIONS,
+        recipients: DEFAULT_RECIPIENTS,
+        signers: DEFAULT_SIGNERS,
       });
+    } else {
+      let needSave = false;
+      if (!setting.recipients || setting.recipients.length === 0) {
+        setting.recipients = DEFAULT_RECIPIENTS;
+        needSave = true;
+      }
+      if (!setting.signers || setting.signers.length === 0) {
+        setting.signers = DEFAULT_SIGNERS;
+        needSave = true;
+      }
+      if (needSave) {
+        await setting.save();
+      }
     }
 
     // Merge any new permissions safely
@@ -195,12 +218,18 @@ export async function ensureSeedAndSettings(): Promise<SystemConfigDTO> {
       unitName: setting.unitName || "Đơn vị KV7",
       padZero: setting.padZero ?? true,
       rolePermissions: mergedPerms,
+      recipients: setting.recipients?.length ? setting.recipients : DEFAULT_RECIPIENTS,
+      signers: setting.signers?.length ? setting.signers : DEFAULT_SIGNERS,
       storageMode: "MONGODB",
     };
   } else {
     const db = readLocalDB();
     return {
       ...db.settings,
+      recipients: db.settings.recipients?.length
+        ? db.settings.recipients
+        : DEFAULT_RECIPIENTS,
+      signers: db.settings.signers?.length ? db.settings.signers : DEFAULT_SIGNERS,
       storageMode: "LOCAL_FALLBACK",
     };
   }
@@ -481,6 +510,8 @@ export async function updateSystemSettings(input: {
   unitName?: string;
   padZero?: boolean;
   rolePermissions?: RolePermissionsMatrix;
+  recipients?: string[];
+  signers?: string[];
 }): Promise<SystemConfigDTO> {
   const current = await ensureSeedAndSettings();
   const useMongo = await isMongoConfigured();
@@ -498,6 +529,10 @@ export async function updateSystemSettings(input: {
           ADMIN: DEFAULT_ROLE_PERMISSIONS.ADMIN, // Đảm bảo Admin luôn full quyền
         }
       : current.rolePermissions;
+  const updatedRecipients =
+    input.recipients !== undefined ? input.recipients : current.recipients;
+  const updatedSigners =
+    input.signers !== undefined ? input.signers : current.signers;
 
   if (useMongo) {
     await SystemSettingModel.findOneAndUpdate(
@@ -507,6 +542,8 @@ export async function updateSystemSettings(input: {
         unitName: updatedUnitName,
         padZero: updatedPadZero,
         rolePermissions: updatedPerms,
+        recipients: updatedRecipients,
+        signers: updatedSigners,
       },
       { upsert: true, new: true }
     );
@@ -515,6 +552,8 @@ export async function updateSystemSettings(input: {
       unitName: updatedUnitName,
       padZero: updatedPadZero,
       rolePermissions: updatedPerms,
+      recipients: updatedRecipients,
+      signers: updatedSigners,
       storageMode: "MONGODB",
     };
   } else {
@@ -524,6 +563,8 @@ export async function updateSystemSettings(input: {
       unitName: updatedUnitName,
       padZero: updatedPadZero,
       rolePermissions: updatedPerms,
+      recipients: updatedRecipients,
+      signers: updatedSigners,
     };
     writeLocalDB(db);
     return {
@@ -531,6 +572,23 @@ export async function updateSystemSettings(input: {
       storageMode: "LOCAL_FALLBACK",
     };
   }
+}
+
+export async function addRecipientToSettings(newRecipient: string): Promise<string[]> {
+  const clean = newRecipient.trim();
+  if (!clean) throw new Error("Tên nơi nhận/gửi không được để trống");
+
+  const current = await ensureSeedAndSettings();
+  const exists = current.recipients.some(
+    (r) => r.toLowerCase() === clean.toLowerCase()
+  );
+  if (exists) {
+    return current.recipients;
+  }
+
+  const updatedList = [...current.recipients, clean];
+  const updatedConfig = await updateSystemSettings({ recipients: updatedList });
+  return updatedConfig.recipients;
 }
 
 export async function getCategoryCounters(

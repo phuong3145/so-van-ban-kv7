@@ -41,6 +41,25 @@ export const DOC_CATEGORIES: {
   },
 ];
 
+export const DEFAULT_RECIPIENTS: string[] = [
+  "Đội 1",
+  "Đội 2",
+  "Đội 3",
+  "Đội 4",
+  "Đội 5",
+  "Đ/c Đội trưởng",
+];
+
+export const DEFAULT_SIGNERS: string[] = [
+  "Đ/c Đông - Đội trưởng",
+  "Đ/c Kiên - Phó đội trưởng",
+  "Đ/c Minh - Phó đội trưởng",
+  "Đ/c Khang - Phó đội trưởng",
+  "Đ/c Tuấn - Phó đội trưởng",
+  "Đ/c Trung - Phó đội trưởng",
+  "Đ/c Phương - Phó đội trưởng",
+];
+
 export type PermissionKey =
   | "TAKE_NUMBER"
   | "EDIT_OWN_DOC"
@@ -101,12 +120,6 @@ export const PERMISSIONS_LIST: PermissionMeta[] = [
     key: "DELETE_ANY_DOC",
     label: "Xóa văn bản của người khác",
     description: "Cho phép xóa bất kỳ bản ghi văn bản nào trong hệ thống",
-    group: "Quản lý sổ & Duyệt",
-  },
-  {
-    key: "INSERT_CUSTOM_NUMBER",
-    label: "Chèn số trống / Đặt lại bộ đếm số",
-    description: "Cho phép lấy một số thứ tự bất kỳ (chèn số bỏ sót) hoặc cài đặt số hiện tại của sổ",
     group: "Quản lý sổ & Duyệt",
   },
   {
