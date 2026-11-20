@@ -41,6 +41,9 @@ interface SystemConfigDTO {
   rolePermissions: RolePermissionsMatrix;
   recipients?: string[];
   signers?: string[];
+  googleDriveConnected?: boolean;
+  googleDriveEmail?: string;
+  googleDriveRootFolderId?: string;
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 
@@ -624,8 +627,67 @@ export function PermissionsMatrixPanel({
 
   const rolesOrder: RoleType[] = ["CAN_BO", "PHO_DOI_TRUONG", "DOI_TRUONG", "ADMIN"];
 
+  function openGoogleDriveConnectPopup() {
+    const w = 520;
+    const h = 640;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    window.open(
+      "/api/drive/auth",
+      "GoogleDriveAuth",
+      `width=${w},height=${h},left=${left},top=${top}`
+    );
+  }
+
   return (
     <form onSubmit={handleSaveSettings} className="space-y-6">
+      {/* Cấu hình Google Drive Lưu trữ PDF */}
+      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-900">
+              Lưu trữ PDF Văn bản trên Google Drive
+            </h2>
+            {config.googleDriveConnected ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Đã kết nối {config.googleDriveEmail ? `(${config.googleDriveEmail})` : ""}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                Chưa kết nối tài khoản Drive
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            Tự động tạo thư mục gốc <strong>&ldquo;Lấy số văn bản&rdquo;</strong> &rarr; thư mục con{" "}
+            <strong>&ldquo;Tháng MM-YYYY&rdquo;</strong> &rarr; đặt tên file PDF theo{" "}
+            <code className="font-mono text-blue-700">
+              [Số ký hiệu] - [Ngày tháng] - [Trích yếu, nội dung].pdf
+            </code>
+          </p>
+          <p className="text-[11px] text-slate-400">
+            * Lưu ý trên Google Cloud Console: Hãy thêm Redirect URI{" "}
+            <code className="font-mono text-slate-600 select-all">
+              {typeof window !== "undefined"
+                ? `${window.location.origin}/api/drive/callback`
+                : "https://so-van-ban-kv7.vercel.app/api/drive/callback"}
+            </code>{" "}
+            vào OAuth 2.0 Client ID của bạn.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={openGoogleDriveConnectPopup}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold rounded-lg shadow transition shrink-0"
+        >
+          {config.googleDriveConnected
+            ? "Kết nối lại Google Drive"
+            : "Kết nối Google Drive ngay"}
+        </button>
+      </div>
+
       {/* Cấu hình ký hiệu đơn vị */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex items-center justify-between">

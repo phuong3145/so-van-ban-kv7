@@ -44,6 +44,10 @@ export interface DocumentDTO {
   nguoiLaySoName: string;
   ghiChu: string;
   trangThai: "CHO_DUYET" | "DA_BAN_HANH" | "THU_HOI";
+  pdfFileId?: string;
+  pdfFileName?: string;
+  pdfViewLink?: string;
+  pdfDownloadLink?: string;
   createdAt: string;
 }
 
@@ -54,6 +58,9 @@ export interface SystemConfigDTO {
   rolePermissions: RolePermissionsMatrix;
   recipients: string[];
   signers: string[];
+  googleDriveConnected: boolean;
+  googleDriveEmail?: string;
+  googleDriveRootFolderId?: string;
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 
@@ -68,6 +75,9 @@ interface LocalDBShape {
     rolePermissions: RolePermissionsMatrix;
     recipients: string[];
     signers: string[];
+    googleDriveRefreshToken?: string;
+    googleDriveEmail?: string;
+    googleDriveRootFolderId?: string;
   };
 }
 
@@ -220,6 +230,11 @@ export async function ensureSeedAndSettings(): Promise<SystemConfigDTO> {
       rolePermissions: mergedPerms,
       recipients: setting.recipients?.length ? setting.recipients : DEFAULT_RECIPIENTS,
       signers: setting.signers?.length ? setting.signers : DEFAULT_SIGNERS,
+      googleDriveConnected: Boolean(
+        setting.googleDriveRefreshToken || process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+      ),
+      googleDriveEmail: setting.googleDriveEmail || "",
+      googleDriveRootFolderId: setting.googleDriveRootFolderId || "",
       storageMode: "MONGODB",
     };
   } else {
@@ -230,6 +245,11 @@ export async function ensureSeedAndSettings(): Promise<SystemConfigDTO> {
         ? db.settings.recipients
         : DEFAULT_RECIPIENTS,
       signers: db.settings.signers?.length ? db.settings.signers : DEFAULT_SIGNERS,
+      googleDriveConnected: Boolean(
+        db.settings.googleDriveRefreshToken || process.env.GOOGLE_DRIVE_REFRESH_TOKEN
+      ),
+      googleDriveEmail: db.settings.googleDriveEmail || "",
+      googleDriveRootFolderId: db.settings.googleDriveRootFolderId || "",
       storageMode: "LOCAL_FALLBACK",
     };
   }
@@ -554,11 +574,15 @@ export async function updateSystemSettings(input: {
       rolePermissions: updatedPerms,
       recipients: updatedRecipients,
       signers: updatedSigners,
+      googleDriveConnected: current.googleDriveConnected,
+      googleDriveEmail: current.googleDriveEmail,
+      googleDriveRootFolderId: current.googleDriveRootFolderId,
       storageMode: "MONGODB",
     };
   } else {
     const db = readLocalDB();
     db.settings = {
+      ...db.settings,
       unitCode: updatedUnitCode,
       unitName: updatedUnitName,
       padZero: updatedPadZero,
@@ -569,7 +593,70 @@ export async function updateSystemSettings(input: {
     writeLocalDB(db);
     return {
       ...db.settings,
+      googleDriveConnected: current.googleDriveConnected,
+      googleDriveEmail: current.googleDriveEmail,
+      googleDriveRootFolderId: current.googleDriveRootFolderId,
       storageMode: "LOCAL_FALLBACK",
+    };
+  }
+}
+
+export async function saveGoogleDriveCredentials(input: {
+  refreshToken: string;
+  email?: string;
+  rootFolderId?: string;
+}): Promise<void> {
+  await ensureSeedAndSettings();
+  const useMongo = await isMongoConfigured();
+  if (useMongo) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const update: Record<string, any> = {
+      googleDriveRefreshToken: input.refreshToken,
+    };
+    if (input.email !== undefined) update.googleDriveEmail = input.email;
+    if (input.rootFolderId !== undefined)
+      update.googleDriveRootFolderId = input.rootFolderId;
+    await SystemSettingModel.findOneAndUpdate(
+      { key: "GLOBAL_CONFIG" },
+      update,
+      { upsert: true }
+    );
+  } else {
+    const db = readLocalDB();
+    db.settings.googleDriveRefreshToken = input.refreshToken;
+    if (input.email !== undefined) db.settings.googleDriveEmail = input.email;
+    if (input.rootFolderId !== undefined)
+      db.settings.googleDriveRootFolderId = input.rootFolderId;
+    writeLocalDB(db);
+  }
+}
+
+export async function getGoogleDriveCredentials(): Promise<{
+  refreshToken: string;
+  email: string;
+  rootFolderId: string;
+}> {
+  await ensureSeedAndSettings();
+  const useMongo = await isMongoConfigured();
+  if (useMongo) {
+    const setting = await SystemSettingModel.findOne({ key: "GLOBAL_CONFIG" });
+    return {
+      refreshToken:
+        setting?.googleDriveRefreshToken ||
+        process.env.GOOGLE_DRIVE_REFRESH_TOKEN ||
+        "",
+      email: setting?.googleDriveEmail || "",
+      rootFolderId: setting?.googleDriveRootFolderId || "",
+    };
+  } else {
+    const db = readLocalDB();
+    return {
+      refreshToken:
+        db.settings.googleDriveRefreshToken ||
+        process.env.GOOGLE_DRIVE_REFRESH_TOKEN ||
+        "",
+      email: db.settings.googleDriveEmail || "",
+      rootFolderId: db.settings.googleDriveRootFolderId || "",
     };
   }
 }
@@ -682,6 +769,10 @@ export async function listDocuments(filter: {
       nguoiLaySoName: d.nguoiLaySoName,
       ghiChu: d.ghiChu || "",
       trangThai: d.trangThai,
+      pdfFileId: d.pdfFileId || "",
+      pdfFileName: d.pdfFileName || "",
+      pdfViewLink: d.pdfViewLink || "",
+      pdfDownloadLink: d.pdfDownloadLink || "",
       createdAt: d.createdAt.toISOString(),
     }));
   } else {
@@ -817,6 +908,10 @@ export async function createDocumentNumber(input: {
       nguoiLaySoName: created.nguoiLaySoName,
       ghiChu: created.ghiChu || "",
       trangThai: created.trangThai,
+      pdfFileId: created.pdfFileId || "",
+      pdfFileName: created.pdfFileName || "",
+      pdfViewLink: created.pdfViewLink || "",
+      pdfDownloadLink: created.pdfDownloadLink || "",
       createdAt: created.createdAt.toISOString(),
     };
   } else {
@@ -896,6 +991,10 @@ export async function findDocumentById(id: string): Promise<DocumentDTO | null> 
         nguoiLaySoName: d.nguoiLaySoName,
         ghiChu: d.ghiChu || "",
         trangThai: d.trangThai,
+        pdfFileId: d.pdfFileId || "",
+        pdfFileName: d.pdfFileName || "",
+        pdfViewLink: d.pdfViewLink || "",
+        pdfDownloadLink: d.pdfDownloadLink || "",
         createdAt: d.createdAt.toISOString(),
       };
     } catch {
@@ -917,6 +1016,10 @@ export async function updateDocumentRecord(
     nguoiLaySoName?: string;
     ghiChu?: string;
     trangThai?: "CHO_DUYET" | "DA_BAN_HANH" | "THU_HOI";
+    pdfFileId?: string;
+    pdfFileName?: string;
+    pdfViewLink?: string;
+    pdfDownloadLink?: string;
   }
 ): Promise<DocumentDTO> {
   await ensureSeedAndSettings();
@@ -933,6 +1036,11 @@ export async function updateDocumentRecord(
       updatePayload.nguoiLaySoName = updates.nguoiLaySoName.trim();
     if (updates.ghiChu !== undefined) updatePayload.ghiChu = updates.ghiChu.trim();
     if (updates.trangThai !== undefined) updatePayload.trangThai = updates.trangThai;
+    if (updates.pdfFileId !== undefined) updatePayload.pdfFileId = updates.pdfFileId;
+    if (updates.pdfFileName !== undefined) updatePayload.pdfFileName = updates.pdfFileName;
+    if (updates.pdfViewLink !== undefined) updatePayload.pdfViewLink = updates.pdfViewLink;
+    if (updates.pdfDownloadLink !== undefined)
+      updatePayload.pdfDownloadLink = updates.pdfDownloadLink;
 
     const updated = await DocumentModel.findByIdAndUpdate(id, updatePayload, { new: true });
     if (!updated) throw new Error("Không tìm thấy văn bản để cập nhật");
@@ -951,6 +1059,10 @@ export async function updateDocumentRecord(
       nguoiLaySoName: updated.nguoiLaySoName,
       ghiChu: updated.ghiChu || "",
       trangThai: updated.trangThai,
+      pdfFileId: updated.pdfFileId || "",
+      pdfFileName: updated.pdfFileName || "",
+      pdfViewLink: updated.pdfViewLink || "",
+      pdfDownloadLink: updated.pdfDownloadLink || "",
       createdAt: updated.createdAt.toISOString(),
     };
   } else {
@@ -971,6 +1083,11 @@ export async function updateDocumentRecord(
           : cur.nguoiLaySoName,
       ghiChu: updates.ghiChu !== undefined ? updates.ghiChu.trim() : cur.ghiChu,
       trangThai: updates.trangThai !== undefined ? updates.trangThai : cur.trangThai,
+      pdfFileId: updates.pdfFileId !== undefined ? updates.pdfFileId : cur.pdfFileId,
+      pdfFileName: updates.pdfFileName !== undefined ? updates.pdfFileName : cur.pdfFileName,
+      pdfViewLink: updates.pdfViewLink !== undefined ? updates.pdfViewLink : cur.pdfViewLink,
+      pdfDownloadLink:
+        updates.pdfDownloadLink !== undefined ? updates.pdfDownloadLink : cur.pdfDownloadLink,
     };
     writeLocalDB(db);
     return db.documents[idx];

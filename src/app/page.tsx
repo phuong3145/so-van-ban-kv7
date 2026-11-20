@@ -20,6 +20,10 @@ import {
   Sparkles,
   Plus,
   ChevronDown,
+  UploadCloud,
+  ExternalLink,
+  FolderOpen,
+  X,
 } from "lucide-react";
 import {
   DEFAULT_RECIPIENTS,
@@ -61,6 +65,10 @@ interface DocumentDTO {
   nguoiLaySoName: string;
   ghiChu: string;
   trangThai: "CHO_DUYET" | "DA_BAN_HANH" | "THU_HOI";
+  pdfFileId?: string;
+  pdfFileName?: string;
+  pdfViewLink?: string;
+  pdfDownloadLink?: string;
   createdAt: string;
 }
 
@@ -71,6 +79,9 @@ interface SystemConfigDTO {
   rolePermissions: RolePermissionsMatrix;
   recipients?: string[];
   signers?: string[];
+  googleDriveConnected?: boolean;
+  googleDriveEmail?: string;
+  googleDriveRootFolderId?: string;
   storageMode: "MONGODB" | "LOCAL_FALLBACK";
 }
 
@@ -78,6 +89,26 @@ type CounterSummary = Record<
   DocCategory,
   { currentSeq: number; nextSoHieu: string; totalDocs: number }
 >;
+
+function formatPreviewPdfName(doc: DocumentDTO): string {
+  const cleanSoHieu = doc.soHieu.replace(/\//g, "_").trim();
+  const d = new Date(doc.ngayLaySo);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const parts = [cleanSoHieu, `${dd}-${mm}-${yyyy}`, doc.trichYeu.trim()];
+  if (doc.ghiChu && doc.ghiChu.trim()) {
+    parts.push(doc.ghiChu.trim());
+  }
+  return `${parts.join(" - ")}.pdf`;
+}
+
+function formatMonthFolder(dateStr: string): string {
+  const d = new Date(dateStr);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `Tháng ${mm}-${yyyy}`;
+}
 
 // Component Autocomplete Dropdown cho "Nơi nhận / gửi" với nút [+] thêm vào Database
 function RecipientAutocomplete({
@@ -225,6 +256,259 @@ function RecipientAutocomplete({
   );
 }
 
+// Toast / Popup nổi hiển thị Số văn bản vừa cấp + Khu vực tải lên file PDF lên Google Drive
+function IssuedNumberToastModal({
+  doc,
+  driveConnected,
+  onClose,
+  onUploaded,
+  onOpenDriveConnect,
+}: {
+  doc: DocumentDTO;
+  driveConnected: boolean;
+  onClose: () => void;
+  onUploaded: (updatedDoc: DocumentDTO) => void;
+  onOpenDriveConnect: () => void;
+}) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadSuccess, setUploadSuccess] = useState("");
+  const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const expectedPdfName = formatPreviewPdfName(doc);
+  const monthFolder = formatMonthFolder(doc.ngayLaySo);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(doc.soHieu);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleUploadPdf(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedFile) {
+      setUploadError("Vui lòng chọn file PDF văn bản trước khi tải lên");
+      return;
+    }
+
+    setUploading(true);
+    setUploadError("");
+    setUploadSuccess("");
+    try {
+      const formData = new FormData();
+      formData.append("documentId", doc.id);
+      formData.append("file", selectedFile);
+
+      const res = await fetch("/api/drive/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadError(data.error || "Tải file PDF thất bại");
+      } else {
+        setUploadSuccess(data.message);
+        setSelectedFile(null);
+        onUploaded(data.document);
+      }
+    } catch {
+      setUploadError("Lỗi kết nối khi tải file lên Google Drive");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+        {/* Header Toast Số văn bản */}
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-700 px-6 py-5 text-white relative">
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 text-emerald-100 hover:text-white p-1 rounded-lg hover:bg-white/10"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          <div className="flex items-center gap-2 text-emerald-100 text-xs font-bold uppercase tracking-wider">
+            <Sparkles className="w-4 h-4" />
+            <span>Đã cấp số văn bản thành công</span>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3 bg-white/15 backdrop-blur-sm rounded-xl p-3.5 border border-white/20">
+            <div>
+              <div className="text-[11px] text-emerald-100">Số hiệu văn bản</div>
+              <div className="text-2xl sm:text-3xl font-mono font-extrabold tracking-tight text-white">
+                {doc.soHieu}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="px-3.5 py-2 bg-white text-emerald-900 hover:bg-emerald-50 rounded-lg text-xs font-bold shadow flex items-center gap-1.5 transition"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  Đã sao chép
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  Sao chép số
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="mt-2.5 text-xs text-emerald-50 line-clamp-2">
+            <strong>Trích yếu:</strong> {doc.trichYeu}
+          </div>
+        </div>
+
+        {/* Khu vực tải lên PDF lên Google Drive */}
+        <form onSubmit={handleUploadPdf} className="p-6 space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                <UploadCloud className="w-4 h-4 text-blue-700" />
+                Đính kèm File PDF Văn bản lên Google Drive
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Thư mục tự động:{" "}
+                <span className="font-semibold text-slate-700">
+                  Lấy số văn bản / {monthFolder}
+                </span>
+              </p>
+            </div>
+
+            {!driveConnected && (
+              <button
+                type="button"
+                onClick={onOpenDriveConnect}
+                className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-semibold rounded-lg border border-amber-300 transition shrink-0"
+              >
+                Kết nối Google Drive
+              </button>
+            )}
+          </div>
+
+          {/* Tên file PDF tự động đặt */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+            <div className="text-slate-500 font-medium flex items-center gap-1.5">
+              <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+              Tên file PDF sẽ tự động lưu trên Google Drive:
+            </div>
+            <div className="font-mono font-semibold text-blue-800 break-all">
+              {expectedPdfName}
+            </div>
+          </div>
+
+          {uploadError && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div>{uploadError}</div>
+                {uploadError.includes("Kết nối Google Drive") && (
+                  <button
+                    type="button"
+                    onClick={onOpenDriveConnect}
+                    className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 bg-red-700 hover:bg-red-800 text-white font-semibold rounded-md"
+                  >
+                    Bấm vào đây để kết nối Google Drive
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {uploadSuccess && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{uploadSuccess}</span>
+              </div>
+              {doc.pdfViewLink && (
+                <div>
+                  <a
+                    href={doc.pdfViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-blue-700 hover:underline font-semibold"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Mở xem file PDF trên Google Drive
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chọn file PDF */}
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null;
+                setSelectedFile(f);
+                setUploadError("");
+              }}
+              className="hidden"
+            />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 hover:bg-blue-50/30 transition"
+            >
+              <UploadCloud className="w-7 h-7 text-blue-600 mx-auto mb-1.5" />
+              {selectedFile ? (
+                <div className="text-xs">
+                  <span className="font-bold text-slate-900">
+                    Đã chọn: {selectedFile.name}
+                  </span>{" "}
+                  <span className="text-slate-500">
+                    ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </span>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-600">
+                  <span className="font-semibold text-blue-700">
+                    Nhấn để chọn file PDF văn bản
+                  </span>{" "}
+                  (hoặc tải lên sau trong bảng sổ văn bản)
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs sm:text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+            >
+              {doc.pdfViewLink ? "Hoàn tất & Đóng" : "Để sau / Đóng"}
+            </button>
+
+            <button
+              type="submit"
+              disabled={!selectedFile || uploading}
+              className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-50 rounded-lg shadow flex items-center gap-1.5"
+            >
+              <UploadCloud className="w-4 h-4" />
+              {uploading ? "Đang tải lên Google Drive..." : "Tải PDF lên Drive"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [user, setUser] = useState<UserDTO | null>(null);
   const [config, setConfig] = useState<SystemConfigDTO | null>(null);
@@ -257,8 +541,8 @@ export default function HomePage() {
   const [formGhiChu, setFormGhiChu] = useState("");
   const [submittingDoc, setSubmittingDoc] = useState(false);
 
-  // Newly issued number banner
-  const [issuedDoc, setIssuedDoc] = useState<DocumentDTO | null>(null);
+  // Newly issued number Toast Modal (with PDF upload to Google Drive)
+  const [issuedDocToast, setIssuedDocToast] = useState<DocumentDTO | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Edit document modal
@@ -314,6 +598,29 @@ export default function HomePage() {
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  // Listen to popup message when Google Drive OAuth completes
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.data && e.data.type === "GOOGLE_DRIVE_CONNECTED") {
+        loadSession();
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadSession]);
+
+  function openGoogleDriveConnectPopup() {
+    const w = 520;
+    const h = 640;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    window.open(
+      "/api/drive/auth",
+      "GoogleDriveAuth",
+      `width=${w},height=${h},left=${left},top=${top}`
+    );
+  }
 
   const fetchDocuments = useCallback(async () => {
     if (!user) return;
@@ -381,8 +688,7 @@ export default function HomePage() {
         setAlertError(data.error || "Không thể lấy số văn bản");
       } else {
         setShowTakeModal(false);
-        setIssuedDoc(data.document);
-        setAlertSuccess(data.message);
+        setIssuedDocToast(data.document);
         fetchDocuments();
       }
     } catch {
@@ -477,6 +783,7 @@ export default function HomePage() {
       "Người ký",
       "Người lấy số",
       "Ghi chú",
+      "Link File PDF Drive",
     ];
     const rows = documents.map((d) => [
       d.stt,
@@ -488,6 +795,7 @@ export default function HomePage() {
       `"${d.nguoiKy.replace(/"/g, '""')}"`,
       `"${d.nguoiLaySoName.replace(/"/g, '""')}"`,
       `"${(d.ghiChu || "").replace(/"/g, '""')}"`,
+      `"${d.pdfViewLink || ""}"`,
     ]);
 
     const csvContent =
@@ -561,7 +869,25 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden md:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white/10 text-slate-200">
+            <button
+              type="button"
+              onClick={openGoogleDriveConnectPopup}
+              className={`hidden md:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition border ${
+                config?.googleDriveConnected
+                  ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/30"
+                  : "bg-amber-500/20 border-amber-400/40 text-amber-200 hover:bg-amber-500/30"
+              }`}
+              title="Trạng thái kết nối Google Drive lưu trữ PDF"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>
+                {config?.googleDriveConnected
+                  ? "Google Drive: Đã kết nối"
+                  : "Kết nối Google Drive"}
+              </span>
+            </button>
+
+            <div className="hidden lg:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white/10 text-slate-200">
               <Database className="w-3.5 h-3.5 text-emerald-400" />
               <span>
                 {config?.storageMode === "MONGODB"
@@ -642,7 +968,7 @@ export default function HomePage() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         {activeTab === "SO_VAN_BAN" && (
           <>
-            {/* 4 Category Cards: KH, BC, TTr, GM (Đã bỏ "Số tiếp theo dự kiến") */}
+            {/* 4 Category Cards: KH, BC, TTr, GM */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {DOC_CATEGORIES.map((cat) => {
                 const stat = counters?.[cat.code];
@@ -698,53 +1024,6 @@ export default function HomePage() {
               })}
             </div>
 
-            {/* Banner hiển thị số vừa cấp */}
-            {issuedDoc && (
-              <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-4 rounded-xl shadow-md flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-xs text-emerald-100 uppercase font-semibold">
-                      Cấp số văn bản thành công!
-                    </div>
-                    <div className="text-lg font-bold flex items-center gap-2">
-                      <span>Số hiệu:</span>
-                      <span className="font-mono bg-white text-emerald-900 px-2.5 py-0.5 rounded-md shadow">
-                        {issuedDoc.soHieu}
-                      </span>
-                      <span className="text-sm font-normal text-emerald-50">
-                        — {issuedDoc.trichYeu}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => copySoHieu(issuedDoc.soHieu, issuedDoc.id)}
-                    className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    {copiedId === issuedDoc.id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" /> Đã sao chép
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> Sao chép số hiệu
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setIssuedDoc(null)}
-                    className="text-xs text-emerald-100 hover:text-white px-2"
-                  >
-                    Đóng ✕
-                  </button>
-                </div>
-              </div>
-            )}
-
             {alertError && (
               <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -752,7 +1031,7 @@ export default function HomePage() {
               </div>
             )}
 
-            {alertSuccess && !issuedDoc && (
+            {alertSuccess && (
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>{alertSuccess}</span>
@@ -834,7 +1113,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Table: STT, Ngày tháng năm lấy số, Số hiệu, Trích yếu nội dung, Nơi nhận/gửi, Người ký, Người lấy số, Ghi chú */}
+            {/* Table */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -847,10 +1126,10 @@ export default function HomePage() {
                       <th className="px-3.5 py-3.5 whitespace-nowrap">
                         Số hiệu
                       </th>
-                      <th className="px-4 py-3.5 min-w-[240px]">
+                      <th className="px-4 py-3.5 min-w-[220px]">
                         Trích yếu nội dung
                       </th>
-                      <th className="px-3.5 py-3.5 min-w-[140px]">
+                      <th className="px-3.5 py-3.5 min-w-[130px]">
                         Nơi nhận / gửi
                       </th>
                       <th className="px-3.5 py-3.5 whitespace-nowrap">
@@ -859,7 +1138,10 @@ export default function HomePage() {
                       <th className="px-3.5 py-3.5 whitespace-nowrap">
                         Người lấy số
                       </th>
-                      <th className="px-3.5 py-3.5 min-w-[130px]">Ghi chú</th>
+                      <th className="px-3.5 py-3.5 min-w-[110px]">Ghi chú</th>
+                      <th className="px-3.5 py-3.5 whitespace-nowrap">
+                        File PDF (Drive)
+                      </th>
                       <th className="px-3.5 py-3.5 text-right whitespace-nowrap">
                         Thao tác
                       </th>
@@ -869,7 +1151,7 @@ export default function HomePage() {
                     {docsLoading ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={10}
                           className="px-4 py-10 text-center text-slate-500"
                         >
                           Đang tải dữ liệu sổ văn bản...
@@ -878,7 +1160,7 @@ export default function HomePage() {
                     ) : documents.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={10}
                           className="px-4 py-12 text-center text-slate-500"
                         >
                           <div className="max-w-sm mx-auto space-y-2">
@@ -951,6 +1233,39 @@ export default function HomePage() {
                             </td>
                             <td className="px-3.5 py-3 text-slate-500 text-xs">
                               {doc.ghiChu || "—"}
+                            </td>
+                            <td className="px-3.5 py-3 whitespace-nowrap">
+                              {doc.pdfViewLink ? (
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={doc.pdfViewLink}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={doc.pdfFileName || "Xem file PDF trên Drive"}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    Xem PDF
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIssuedDocToast(doc)}
+                                    title="Tải lại file PDF khác"
+                                    className="p-1 text-slate-400 hover:text-blue-700 rounded"
+                                  >
+                                    <UploadCloud className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setIssuedDocToast(doc)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 transition"
+                                >
+                                  <UploadCloud className="w-3.5 h-3.5" />
+                                  Tải PDF lên
+                                </button>
+                              )}
                             </td>
                             <td className="px-3.5 py-3 text-right whitespace-nowrap space-x-1">
                               {canEdit && (
@@ -1128,7 +1443,7 @@ export default function HomePage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Ghi chú
+                    Ghi chú / Nội dung bổ sung
                   </label>
                   <input
                     type="text"
@@ -1159,6 +1474,20 @@ export default function HomePage() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Toast Popup hiển thị Số văn bản vừa cấp + Upload PDF lên Google Drive */}
+      {issuedDocToast && (
+        <IssuedNumberToastModal
+          doc={issuedDocToast}
+          driveConnected={Boolean(config?.googleDriveConnected)}
+          onClose={() => setIssuedDocToast(null)}
+          onUploaded={(updatedDoc) => {
+            setIssuedDocToast(updatedDoc);
+            fetchDocuments();
+          }}
+          onOpenDriveConnect={openGoogleDriveConnectPopup}
+        />
       )}
 
       {/* Modal Chỉnh sửa văn bản */}

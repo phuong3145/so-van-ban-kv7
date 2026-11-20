@@ -50,6 +50,10 @@ export interface IDocumentRecord extends MongooseDocument {
   nguoiLaySoName: string;
   ghiChu: string;
   trangThai: "CHO_DUYET" | "DA_BAN_HANH" | "THU_HOI";
+  pdfFileId?: string;
+  pdfFileName?: string;
+  pdfViewLink?: string;
+  pdfDownloadLink?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -72,6 +76,10 @@ const DocumentRecordSchema = new Schema<IDocumentRecord>(
       enum: ["CHO_DUYET", "DA_BAN_HANH", "THU_HOI"],
       default: "DA_BAN_HANH",
     },
+    pdfFileId: { type: String, default: "" },
+    pdfFileName: { type: String, default: "" },
+    pdfViewLink: { type: String, default: "" },
+    pdfDownloadLink: { type: String, default: "" },
   },
   { timestamps: true }
 );
@@ -100,6 +108,9 @@ export interface ISystemSetting extends MongooseDocument {
   rolePermissions: RolePermissionsMatrix;
   recipients: string[];
   signers: string[];
+  googleDriveRefreshToken?: string;
+  googleDriveEmail?: string;
+  googleDriveRootFolderId?: string;
 }
 
 const SystemSettingSchema = new Schema<ISystemSetting>(
@@ -120,6 +131,9 @@ const SystemSettingSchema = new Schema<ISystemSetting>(
       type: [String],
       default: DEFAULT_SIGNERS,
     },
+    googleDriveRefreshToken: { type: String, default: "" },
+    googleDriveEmail: { type: String, default: "" },
+    googleDriveRootFolderId: { type: String, default: "" },
   },
   { timestamps: true }
 );
