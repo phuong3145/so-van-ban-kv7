@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import bcrypt from "bcryptjs";
 import {
@@ -64,7 +65,9 @@ interface LocalDBShape {
   };
 }
 
-const LOCAL_DB_PATH = path.join(process.cwd(), ".local-db.json");
+const LOCAL_DB_PATH = process.env.VERCEL
+  ? path.join(os.tmpdir(), "so-van-ban-local-db.json")
+  : path.join(process.cwd(), ".local-db.json");
 
 function getInitialLocalDB(): LocalDBShape {
   const adminHash = bcrypt.hashSync("123456", 10);
